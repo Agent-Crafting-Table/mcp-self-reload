@@ -8,8 +8,9 @@
  * script immediately relaunches bun with the new code, keeping the MCP
  * pipe to Claude Code alive throughout.
  *
- * Required package.json start script:
- *   "start": "bun install --no-summary && while true; do bun server.ts; sleep 0.5; done"
+ * Required package.json start script (note: use sh -c — bun's built-in shell
+ * does not support while/do/done loops):
+ *   "start": "bun install --no-summary && sh -c 'while true; do bun server.ts; sleep 0.5; done'"
  */
 
 import { statSync } from 'fs'

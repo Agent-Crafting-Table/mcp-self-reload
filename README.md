@@ -10,18 +10,28 @@ When Claude Code starts an MCP plugin (`bun server.ts`), it owns the process. If
 
 ## How This Solves It
 
-Instead of exiting and hoping the supervisor restarts, `mcp-self-reload` spawns the replacement bun process with inherited stdin/stdout **before** exiting. The MCP pipe to Claude Code stays live throughout the handoff — Claude Code never sees a disconnect.
+Use a **bash restart loop** as the outer process Claude Code monitors. Claude Code's pipe stays connected to the outer shell process (which never exits). When bun exits to reload, the shell immediately restarts it — no gap, no supervisor dependency.
 
 ```
 File changes on disk
         ↓
-watchSelf() detects new mtime
+watchSelf() detects new mtime → process.exit(0)
         ↓
-spawn: bun server.ts (inherits same stdin/stdout)  ← new process, same pipe
+sh restart loop catches the exit
         ↓
-wait 500ms for replacement to start
-        ↓
-exit(0)  ← old process gone, new process handling requests
+bun server.ts restarted in 0.5s  ← same MCP pipe, new code
+```
+
+## Setup
+
+Add this to your `package.json` start script. **Important:** use `sh -c` — bun's built-in shell (`--shell=bun`) doesn't support `while/do/done` loops.
+
+```json
+{
+  "scripts": {
+    "start": "bun install --no-summary && sh -c 'while true; do bun server.ts; sleep 0.5; done'"
+  }
+}
 ```
 
 ## Usage
@@ -33,9 +43,8 @@ import { watchSelf, isReload } from 'mcp-self-reload/src/watch.ts'
 
 // At the end of setup, start watching
 watchSelf({
-  intervalMs: 30_000,     // check every 30s (default)
-  handoffDelayMs: 500,    // wait 500ms after spawn before exiting (default)
-  isBusy: () => false,    // optional: defer if mid-task
+  intervalMs: 30_000,   // check every 30s (default)
+  isBusy: () => false,  // optional: defer if mid-task
 })
 ```
 
@@ -61,7 +70,7 @@ watchSelf({ isBusy: () => handling })
 import { isReload } from 'mcp-self-reload/src/watch.ts'
 
 if (isReload) {
-  // This process was spawned by a self-handoff, not Claude Code directly
+  // This process was restarted by the outer loop, not Claude Code's first boot
   // Useful for skipping startup announcements, re-pairing flows, etc.
 }
 ```
@@ -74,11 +83,16 @@ Pair this with a file-sync script. Example:
 # 1. Edit your server.ts
 # 2. Sync to Claude Code's plugin directory
 cp server.ts ~/.claude/plugins/cache/my-plugin/0.0.1/server.ts
-# 3. watchSelf() detects the mtime change within 30s and self-reloads
+# 3. watchSelf() detects the mtime change within 30s and exits
+# 4. The sh restart loop immediately relaunches with the new code
 ```
 
 For multi-session fleets, use [fleet-discord](https://github.com/Agent-Crafting-Table/fleet-discord)'s `fleet-sync-plugin.sh` to sync across all session plugin dirs simultaneously.
 
+## Why not spawn-handoff?
+
+An earlier approach tried spawning a replacement bun process with inherited stdio before exiting. This doesn't work: Claude Code closes the pipe when the original process it spawned exits, which kills the replacement too. The outer shell loop avoids this because the shell (not bun) is what Claude Code monitors.
+
 ## Why not `bun --hot`?
 
-`bun --hot` does hot module replacement in-process but requires special structuring for cleanup (`import.meta.hot.dispose`). For MCP servers, the stdio transport setup needs to stay intact through reloads, which makes hot reloading fragile. The self-handoff approach is simpler: spawn a clean replacement, pass the pipe, exit.
+`bun --hot` does hot module replacement in-process but requires special structuring for cleanup (`import.meta.hot.dispose`). For MCP servers, the stdio transport setup needs to stay intact through reloads, which makes hot reloading fragile.
