@@ -1,0 +1,12 @@
+{
+  "name": "mcp-self-reload",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/watch.ts"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.0.0"
+  }
+}
