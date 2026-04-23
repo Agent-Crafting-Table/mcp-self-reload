@@ -2,6 +2,7 @@
 
 Zero-downtime code rolls for bun-based MCP plugins.
 
+
 > Part of [The Agent Crafting Table](https://github.com/Agent-Crafting-Table) — standalone Claude Code agent components.
 
 ## The Problem
