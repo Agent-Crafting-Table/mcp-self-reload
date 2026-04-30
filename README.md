@@ -5,6 +5,53 @@ Zero-downtime code rolls for bun-based MCP plugins.
 
 > Part of [The Agent Crafting Table](https://github.com/Agent-Crafting-Table) — standalone Claude Code agent components.
 
+## How It Works
+
+```mermaid
+flowchart TD
+    A[Claude Code starts] --> B[sh restart loop launched
+sh -c while true do bun server.ts done]
+    B --> C[bun server.ts starts
+MCP plugin active]
+    C --> D[watchSelf interval
+checks own file mtime every 30s]
+
+    D -->|mtime unchanged| D
+    D -->|mtime changed| E{isBusy check}
+    E -->|busy — mid-task| D
+    E -->|idle| F[process.exit 0]
+    F --> G[sh restart loop catches exit]
+    G --> H[bun server.ts restarted in 0.5s
+new code loaded]
+    H --> D
+
+    subgraph "Why outer shell loop?"
+        I["Claude Code monitors the SHELL process
+not bun directly
+shell never exits → MCP pipe stays open
+bun can exit freely to reload"]
+    end
+```
+
+```mermaid
+sequenceDiagram
+    participant DEV as Developer
+    participant FS as Filesystem
+    participant BUN as bun server.ts
+    participant SH as sh restart loop
+    participant CC as Claude Code
+
+    DEV->>FS: edit server.ts, save
+    DEV->>FS: cp server.ts ~/.claude/plugins/.../server.ts
+    Note over BUN: watchSelf() detects mtime change within 30s
+    BUN->>BUN: isBusy() = false (idle)
+    BUN->>SH: process.exit(0)
+    SH->>BUN: restart immediately (sleep 0.5s)
+    Note over BUN,CC: same MCP pipe, new code running
+    BUN->>CC: MCP server ready (isReload = true)
+    Note over BUN: skip startup announcements if isReload
+```
+
 ## The Problem
 
 When Claude Code starts an MCP plugin (`bun server.ts`), it owns the process. If the plugin exits to reload new code, Claude Code's MCP supervisor is supposed to restart it — but the supervisor is unreliable. It can take minutes to restart, or silently fail, leaving the plugin dead with no Discord messages getting through.
